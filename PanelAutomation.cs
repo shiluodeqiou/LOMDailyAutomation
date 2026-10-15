@@ -79,8 +79,8 @@ namespace LOMDailyAutomation
             _focusStat = Config.Bind(
                 "DailyAutomation",
                 "FocusStat",
-                "輕功",
-                "功法修炼的优先目标（GameStatType 名称，如 輕功、武功刀劍）。武学面板会自动修炼能提升该目标的功法；留空表示不限制。");
+                "医术",
+                "功法修炼的优先目标（GameStatType 名称，如 医术、輕功、武功刀劍）。武学面板会自动修炼能提升该目标的功法；留空表示不限制。");
             _nightOptionOrder = Config.Bind(
                 "DailyAutomation",
                 "NightOptionOrder",

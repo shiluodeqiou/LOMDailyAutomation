@@ -47,7 +47,7 @@ ActionTimeoutSeconds = 90
 DoorOptionCursor = 0
 DiagnosticLogging = true
 ContributionTarget = 60
-FocusStat = 輕功
+FocusStat = 医术
 NightOptionOrder = 折纸,休息,饮食,赌博
 BreakTempleOptionOrder = 修炼武功,打工赚钱,无所事事,饮食,休息
 ```
