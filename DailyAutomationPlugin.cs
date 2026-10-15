@@ -50,8 +50,7 @@ namespace LOMDailyAutomation
             PositionType.大門,
             PositionType.講經堂,
             PositionType.伙房,
-            PositionType.女弟子房,
-            PositionType.神秘房子
+            PositionType.女弟子房
         };
 
         private static DailyAutomationPlugin _instance;
