@@ -1,0 +1,24 @@
+## Settings file for 活侠传日常自动化 2026.10.16
+## Plugin GUID: com.codex.lom.daily-automation
+## 实际配置文件由 BepInEx 生成在 BepInEx/config/com.codex.lom.daily-automation.cfg
+
+[DailyAutomation]
+EnableAutomation = true
+ToggleKey = F8
+WindowToggleKey = F7
+ShowWindowAtStartup = true
+AlwaysFastForward = true
+FastForwardTimeScale = 10
+AutoWinGroupBattleDuringFastForward = true
+ActionOrder = 正心堂,校场,煉丹房,鍛冶場,後山,弟子房,講經堂,伙房
+InnerActionPreference = 自由
+ContributionTarget = 60
+DoorOptionCursor = 0
+FocusStat = 輕功
+NightOptionOrder = 折纸,休息,饮食,赌博
+BreakTempleOptionOrder = 修炼武功,打工赚钱,无所事事,饮食,休息
+ActionTimeoutSeconds = 90
+StopOnMainMission = true
+StopOnSubMission = false
+AutoReloadOnDeath = true
+DiagnosticLogging = true

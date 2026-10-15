@@ -1,0 +1,21 @@
+# 本地运行产物
+__pycache__/
+*.pyc
+bin/
+logs/
+install-result.txt
+
+# 内部交接文档与施工记录（不随公开发布）
+STATUS.md
+
+# 工具生成的数据（可由 tools/parse-data.py 从游戏目录重新生成）
+tools/game-data.json
+
+# 打好的发布包走 GitHub Releases，不进版本库
+dist/*.zip
+*.zip
+
+# 操作系统
+Thumbs.db
+desktop.ini
+.DS_Store
