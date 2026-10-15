@@ -3,12 +3,19 @@
 import hashlib
 import json
 import os
+from urllib.parse import quote
 
 here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 zip_path = os.path.join(here, 'dist', 'LOMDailyAutomation-v2026.10.16.zip')
 sha = hashlib.sha256(open(zip_path, 'rb').read()).hexdigest()
 
+# 发布页顶部的面板截图（仓库 main 分支里的展示图片）
+shot = ('https://raw.githubusercontent.com/shiluodeqiou/LOMDailyAutomation/main/'
+        + quote('展示图片/日常自动化1.png'))
+
 body = """**《活侠传》自由行动日常自动化：F8 一按，日常自己跑。**
+
+![F7 面板](%s)
 
 ## 安装
 
@@ -41,7 +48,7 @@ body = """**《活侠传》自由行动日常自动化：F8 一按，日常自�
 
 ---
 版本 `v2026.10.16`（首个公开发布）· MIT 许可 · 源码与说明见仓库主页 · 安装包 SHA256：`%s`
-""" % sha
+""" % (shot, sha)
 
 out = {
     'tag_name': 'v2026.10.16',
