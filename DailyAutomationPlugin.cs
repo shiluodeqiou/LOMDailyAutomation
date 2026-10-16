@@ -215,7 +215,7 @@ namespace LOMDailyAutomation
                 Logger.LogError("找不到 PositionController._position，插件不会执行自动化。");
             }
 
-            _windowRect = new Rect(20f, 20f, 430f, 560f);
+            _windowRect = new Rect(20f, 20f, 660f, 560f);
             _showWindow = _showWindowAtStartup.Value;
             TryParseActionOrder();
 
@@ -1832,6 +1832,8 @@ namespace LOMDailyAutomation
 
         private void DrawAutomationWindow(int windowId)
         {
+            // 宽度按屏幕自适应：默认给足 660，长句不用拉横向滚动条；小屏幕自动收窄。
+            _windowRect.width = Mathf.Min(660f, Mathf.Max(430f, Screen.width - 40f));
             _windowRect.height = Mathf.Min(720f, Mathf.Max(300f, Screen.height - 40f));
             _panelScroll = GUILayout.BeginScrollView(_panelScroll, false, true, GUILayout.Height(_windowRect.height - 45f));
             GUILayout.BeginVertical();
