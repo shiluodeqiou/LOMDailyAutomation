@@ -1392,14 +1392,9 @@ namespace LOMDailyAutomation
                 }
                 Log("升级面板：已修复当前升级项 " + item.Key + "（等级 -1 → 0，与游戏进化流程一致）");
 
-                // 面板的刷新方法是内部的，用反射调用；修复后立刻把显示刷新掉。
+                // 刷新条目按钮的显示；面板文本本身由即将执行的 UpdateStatus 刷新（本方法挂在它的前缀上，不能再调它）。
                 try
                 {
-                    MethodInfo updateStatus = AccessTools.Method(typeof(UpgradePanel), "UpdateStatus");
-                    if (updateStatus != null)
-                    {
-                        updateStatus.Invoke(panel, null);
-                    }
                     MethodInfo updateButton = AccessTools.Method(typeof(UpgradePanel), "UpdateButton");
                     if (updateButton != null)
                     {
@@ -2036,6 +2031,20 @@ namespace LOMDailyAutomation
                 if (_instance != null)
                 {
                     _instance.OnUpgradePanelOpened(__instance);
+                }
+            }
+        }
+
+        // 面板每次刷新（手动打开也会刷）先检查并修复“当前升级项停在 -1 级”的坏状态——
+        // 这样即使不开自动化，-1 的武器也会在玩家打开锻造/炼丹面板的那一刻被修好（2026-10-17）。
+        [HarmonyPatch(typeof(UpgradePanel), "UpdateStatus")]
+        private static class UpgradePanelUpdateStatusPatch
+        {
+            private static void Prefix(UpgradePanel __instance)
+            {
+                if (_instance != null)
+                {
+                    _instance.RepairCurrentUpgradeItem(__instance);
                 }
             }
         }
