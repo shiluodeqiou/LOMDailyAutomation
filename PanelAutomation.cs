@@ -1364,7 +1364,56 @@ namespace LOMDailyAutomation
             bool poisonPanel = IsPoisonPanel(panel, pointStat);
             UpgradeItemType[] types = poisonPanel ? PoisonItemTypes : WeaponItemTypes;
             Log("升级面板归属：" + (poisonPanel ? "毒药" : "兵器") + "，点数池=" + pointStat.StatType);
+            RepairCurrentUpgradeItem(panel);
             ProcessUpgradeFamily(types, pointStat, moneyStat, poisonPanel ? "毒药" : "兵器");
+        }
+
+        // 修复“当前升级项停在 -1 级”的历史遗留状态（旧版进化少调 Init 造成，2026-10-17 修）：
+        // 等级为 -1 时 GetNextLevelRequirePoints() 会读 _upgradeLevels[-1] 越界，
+        // 导致逐项加点逻辑整项跳过（表现为“有大量点数却投入 0 次”），界面也会显示“-1/10”。
+        // 按游戏 DevelopCurrentItem 的做法把当前项初始化回 0 级。
+        private void RepairCurrentUpgradeItem(UpgradePanel panel)
+        {
+            try
+            {
+                UpgradeItemButton button = _upgradeCurrentItemField == null
+                    ? null
+                    : _upgradeCurrentItemField.GetValue(panel) as UpgradeItemButton;
+                UpgradeItemData item = button == null ? null : button.Data;
+                if (item == null || item.CurrentLevel >= 0)
+                {
+                    return;
+                }
+
+                item.Init();
+                if (!item.AlreadyDevelop)
+                {
+                    item.SetAlreadyDevelop(true);
+                }
+                Log("升级面板：已修复当前升级项 " + item.Key + "（等级 -1 → 0，与游戏进化流程一致）");
+
+                // 面板的刷新方法是内部的，用反射调用；修复后立刻把显示刷新掉。
+                try
+                {
+                    MethodInfo updateStatus = AccessTools.Method(typeof(UpgradePanel), "UpdateStatus");
+                    if (updateStatus != null)
+                    {
+                        updateStatus.Invoke(panel, null);
+                    }
+                    MethodInfo updateButton = AccessTools.Method(typeof(UpgradePanel), "UpdateButton");
+                    if (updateButton != null)
+                    {
+                        updateButton.Invoke(panel, null);
+                    }
+                }
+                catch
+                {
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("修复当前升级项失败：" + ex.Message);
+            }
         }
 
         private bool IsPoisonPanel(UpgradePanel panel, GameStat pointStat)
@@ -1474,6 +1523,19 @@ namespace LOMDailyAutomation
                             item.ResetDevelop();
                             PlayerStatManagerData manager = PlayerStatManagerData.Instance;
                             manager.SetCurrentUpgradeItem(types[t], entry.NextItem.Key);
+
+                            // 与游戏 DevelopPanel.DevelopCurrentItem 完全对齐：切换后新形态要 Init()
+                            // （等级 0 / 点数 0）并标记已开发；漏掉这步会让新形态停在 ResetDevelop
+                            // 遗留的 -1 状态（显示“-1/10”、无法加点/锻造）——2026-10-17 修复。
+                            UpgradeItemData nextItem = GetUpgradeItem(types[t]);
+                            if (nextItem != null)
+                            {
+                                nextItem.Init();
+                                if (!nextItem.AlreadyDevelop)
+                                {
+                                    nextItem.SetAlreadyDevelop(true);
+                                }
+                            }
                         }
                         catch (Exception ex)
                         {
