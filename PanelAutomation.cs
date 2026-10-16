@@ -64,7 +64,20 @@ namespace LOMDailyAutomation
             GameStatType.武功內功
         };
 
-        private const string MedicalFocusValue = "医术";
+        // “特殊目标”：加成以天赋（战斗技能）形式给出的目标，按 显示名 / 天赋Id / 战斗技能键 匹配。
+        // 只加数据、不改逻辑：以后要支持别的天赋目标，往这张表里加一行即可。
+        private sealed class SpecialFocusTarget
+        {
+            public string Name;
+            public string TalentId;
+            public string SkillKey;
+        }
+
+        private static readonly SpecialFocusTarget[] SpecialFocusTargets =
+        {
+            new SpecialFocusTarget { Name = "医术", TalentId = "2101", SkillKey = "G002" },
+            new SpecialFocusTarget { Name = "战术", TalentId = "9100", SkillKey = "Z001" }
+        };
 
         private static FieldInfo _martialStatRefStatField;
         private static FieldInfo _martialStatRefTalentField;
@@ -80,7 +93,7 @@ namespace LOMDailyAutomation
                 "DailyAutomation",
                 "FocusStat",
                 "医术",
-                "功法修炼的优先目标（GameStatType 名称，如 医术、輕功、武功刀劍）。武学面板会自动修炼能提升该目标的功法；留空表示不限制。");
+                "功法修炼的优先目标：属性/武功类别（GameStatType 名称，如 輕功、武功刀劍）或特殊天赋（医术、战术）。武学面板会自动修炼能提升该目标的功法；留空表示不限制。面板“切换目标”会依次轮换这些目标。");
             _nightOptionOrder = Config.Bind(
                 "DailyAutomation",
                 "NightOptionOrder",
@@ -465,8 +478,8 @@ namespace LOMDailyAutomation
 
             GameStatType focusType;
             bool hasFocus = TryGetFocusStat(out focusType);
-            bool medicalFocus = IsMedicalFocus();
-            if (medicalFocus)
+            SpecialFocusTarget specialFocus = GetSpecialFocus();
+            if (specialFocus != null)
             {
                 hasFocus = true;
             }
@@ -486,8 +499,8 @@ namespace LOMDailyAutomation
                 }
 
                 // 目标功法被前置条件卡住时，收集"缺什么属性"，优先修炼能补这些属性的功法。
-                List<FocusPrerequisite> focusPrerequisites = medicalFocus || hasFocus
-                    ? CollectFocusPrerequisites(focusType, medicalFocus)
+                List<FocusPrerequisite> focusPrerequisites = specialFocus != null || hasFocus
+                    ? CollectFocusPrerequisites(focusType, specialFocus)
                     : NoFocusPrerequisites;
                 if (focusPrerequisites.Count > 0 && !prereqLogged)
                 {
@@ -545,8 +558,8 @@ namespace LOMDailyAutomation
 
                     // 目标判定覆盖当前级及以后的整本书：多数功法（尤其医书）把目标加成放在满级那一级，
                     // 只看当前级会漏判，导致医书不被优先。
-                    int focusLevel = medicalFocus || hasFocus
-                        ? FindFocusUpgradeLevel(book, focusType, medicalFocus)
+                    int focusLevel = specialFocus != null || hasFocus
+                        ? FindFocusUpgradeLevel(book, focusType, specialFocus)
                         : -1;
                     bool isFocus = focusLevel >= 0;
                     string focusTag = string.Empty;
@@ -683,7 +696,7 @@ namespace LOMDailyAutomation
 
         // 在“当前级及以后”的等级数据里找最早能提升目标的一级；返回等级下标，找不到返回 -1。
         // 书的升级逐级进行、已过去的等级不会再给加成，所以从当前级开始向后找。
-        private int FindFocusUpgradeLevel(Book book, GameStatType focusType, bool medical)
+        private int FindFocusUpgradeLevel(Book book, GameStatType focusType, SpecialFocusTarget specialFocus)
         {
             if (book == null)
             {
@@ -713,8 +726,8 @@ namespace LOMDailyAutomation
 
             for (int i = from; i < all.Length; i++)
             {
-                bool match = medical
-                    ? LevelRaisesMedical(all[i])
+                bool match = specialFocus != null
+                    ? LevelRaisesSpecial(all[i], specialFocus)
                     : LevelRaisesFocusStat(all[i], focusType);
                 if (match)
                 {
@@ -762,14 +775,14 @@ namespace LOMDailyAutomation
             return false;
         }
 
-        private bool LevelRaisesMedical(MartialLevelData data)
+        private bool LevelRaisesSpecial(MartialLevelData data, SpecialFocusTarget target)
         {
             if (data == null)
             {
                 return false;
             }
 
-            if (ModifyStatsRaiseMedical(data.LevelUpStat))
+            if (ModifyStatsRaiseSpecial(data.LevelUpStat, target))
             {
                 return true;
             }
@@ -780,7 +793,7 @@ namespace LOMDailyAutomation
                 for (int i = 0; i < consumables.Count; i++)
                 {
                     MartialLearnConsumable consumable = consumables[i];
-                    if (consumable != null && ModifyStatsRaiseMedical(consumable.ConsumableList))
+                    if (consumable != null && ModifyStatsRaiseSpecial(consumable.ConsumableList, target))
                     {
                         return true;
                     }
@@ -790,7 +803,7 @@ namespace LOMDailyAutomation
             return false;
         }
 
-        private bool ModifyStatsRaiseMedical(List<MartialModifyStat> stats)
+        private bool ModifyStatsRaiseSpecial(List<MartialModifyStat> stats, SpecialFocusTarget target)
         {
             if (stats == null)
             {
@@ -809,9 +822,10 @@ namespace LOMDailyAutomation
                 try
                 {
                     string nameKey = reference.GetNameKey() ?? string.Empty;
-                    if (nameKey.IndexOf("G002", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        nameKey.IndexOf("医术", StringComparison.Ordinal) >= 0 ||
-                        nameKey.IndexOf("醫術", StringComparison.Ordinal) >= 0)
+                    if (nameKey.IndexOf(target.SkillKey, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        nameKey.IndexOf(target.Name, StringComparison.Ordinal) >= 0 ||
+                        target.Name == "医术" && nameKey.IndexOf("醫術", StringComparison.Ordinal) >= 0 ||
+                        target.Name == "战术" && nameKey.IndexOf("戰術", StringComparison.Ordinal) >= 0)
                     {
                         return true;
                     }
@@ -829,15 +843,24 @@ namespace LOMDailyAutomation
                 try
                 {
                     PlayerTalentData talent = _martialStatRefTalentField.GetValue(reference) as PlayerTalentData;
-                    if (talent == null || !talent.CombatSkill)
+                    if (talent == null)
                     {
                         continue;
                     }
 
-                    string combatKey = talent.CombatSkillKey ?? string.Empty;
-                    if (combatKey.IndexOf("G002", StringComparison.OrdinalIgnoreCase) >= 0)
+                    // 先按天赋 Id 精确匹配（最稳），再退回战斗技能键。
+                    if (string.Equals(talent.Id, target.TalentId, StringComparison.Ordinal))
                     {
                         return true;
+                    }
+
+                    if (talent.CombatSkill)
+                    {
+                        string combatKey = talent.CombatSkillKey ?? string.Empty;
+                        if (combatKey.IndexOf(target.SkillKey, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            return true;
+                        }
                     }
                 }
                 catch
@@ -863,7 +886,7 @@ namespace LOMDailyAutomation
         private static readonly List<FocusPrerequisite> NoFocusPrerequisites = new List<FocusPrerequisite>();
 
         // 从所有“目标功法”里收集当前（或后续等级）被前置卡住的属性缺口。
-        private List<FocusPrerequisite> CollectFocusPrerequisites(GameStatType focusType, bool medicalFocus)
+        private List<FocusPrerequisite> CollectFocusPrerequisites(GameStatType focusType, SpecialFocusTarget specialFocus)
         {
             List<FocusPrerequisite> result = new List<FocusPrerequisite>();
             foreach (Book book in EnumerateOwnedMartialBooks())
@@ -873,7 +896,7 @@ namespace LOMDailyAutomation
                     continue;
                 }
 
-                if (FindFocusUpgradeLevel(book, focusType, medicalFocus) < 0)
+                if (FindFocusUpgradeLevel(book, focusType, specialFocus) < 0)
                 {
                     continue;
                 }
@@ -1263,25 +1286,63 @@ namespace LOMDailyAutomation
             return Enum.TryParse(value, out focusType);
         }
 
-        private bool IsMedicalFocus()
+        // 读取配置里的“特殊目标”（按天赋匹配的 医术/战术 等）；不是特殊目标时返回 null。
+        private SpecialFocusTarget GetSpecialFocus()
         {
             if (_focusStat == null)
             {
-                return false;
+                return null;
             }
 
             string value = (_focusStat.Value ?? string.Empty).Trim();
-            return value == MedicalFocusValue || value == "醫術" ||
-                value.Equals("medical", StringComparison.OrdinalIgnoreCase) ||
-                value.Equals("medicine", StringComparison.OrdinalIgnoreCase) ||
-                value.Equals("G002", StringComparison.OrdinalIgnoreCase);
+            if (value.Length == 0)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < SpecialFocusTargets.Length; i++)
+            {
+                if (MatchesSpecialFocusValue(SpecialFocusTargets[i], value))
+                {
+                    return SpecialFocusTargets[i];
+                }
+            }
+
+            return null;
+        }
+
+        private static bool MatchesSpecialFocusValue(SpecialFocusTarget target, string value)
+        {
+            if (string.Equals(value, target.Name, StringComparison.Ordinal) ||
+                string.Equals(value, target.SkillKey, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, target.TalentId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (target.Name == "医术")
+            {
+                return value == "醫術" ||
+                    value.Equals("medical", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("medicine", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (target.Name == "战术")
+            {
+                return value == "戰術" ||
+                    value.Equals("tactics", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("tactic", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
         }
 
         private string GetFocusStatLabel()
         {
-            if (IsMedicalFocus())
+            SpecialFocusTarget special = GetSpecialFocus();
+            if (special != null)
             {
-                return MedicalFocusValue;
+                return special.Name;
             }
 
             GameStatType focusType;
@@ -1846,25 +1907,42 @@ namespace LOMDailyAutomation
                 return;
             }
 
-            GameStatType current;
-            bool hasFocus = TryGetFocusStat(out current);
-            int index = IsMedicalFocus() ? FocusStatChoices.Length : -1;
-            if (hasFocus && index < 0)
+            // 循环顺序：属性/武功类别（FocusStatChoices）→ 特殊目标（医术、战术…）→ 回到开头。
+            int total = FocusStatChoices.Length + SpecialFocusTargets.Length;
+            int index = -1;
+
+            SpecialFocusTarget special = GetSpecialFocus();
+            if (special != null)
             {
-                for (int i = 0; i < FocusStatChoices.Length; i++)
+                for (int i = 0; i < SpecialFocusTargets.Length; i++)
                 {
-                    if (FocusStatChoices[i] == current)
+                    if (SpecialFocusTargets[i] == special)
                     {
-                        index = i;
+                        index = FocusStatChoices.Length + i;
                         break;
                     }
                 }
             }
-
-            int next = (index + 1) % (FocusStatChoices.Length + 1);
-            if (next == FocusStatChoices.Length)
+            else
             {
-                _focusStat.Value = MedicalFocusValue;
+                GameStatType current;
+                if (TryGetFocusStat(out current))
+                {
+                    for (int i = 0; i < FocusStatChoices.Length; i++)
+                    {
+                        if (FocusStatChoices[i] == current)
+                        {
+                            index = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            int next = (index + 1) % total;
+            if (next >= FocusStatChoices.Length)
+            {
+                _focusStat.Value = SpecialFocusTargets[next - FocusStatChoices.Length].Name;
             }
             else
             {
