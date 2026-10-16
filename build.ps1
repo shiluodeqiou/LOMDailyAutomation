@@ -4,7 +4,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $sources = @(
     (Join-Path $root 'LOMDailyAutomation-src\DailyAutomationPlugin.cs'),
     (Join-Path $root 'LOMDailyAutomation-src\PanelAutomation.cs'),
-    (Join-Path $root 'LOMDailyAutomation-src\CombatControls.cs')
+    (Join-Path $root 'LOMDailyAutomation-src\CombatControls.cs'),
+    (Join-Path $root 'LOMDailyAutomation-src\DebugMenuSkills.cs')
 )
 $outputDir = Join-Path $root 'LOMDailyAutomation-src\bin'
 $installedDir = Join-Path $root 'BepInEx\plugins\LOMDailyAutomation'

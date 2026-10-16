@@ -19,7 +19,7 @@ namespace LOMDailyAutomation
     {
         private const string PluginGuid = "com.codex.lom.daily-automation";
         private const string PluginName = "活侠传日常自动化";
-        private const string PluginVersion = "2026.10.16";
+        private const string PluginVersion = "2026.10.17";
 
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<KeyCode> _toggleKey;
@@ -232,6 +232,7 @@ namespace LOMDailyAutomation
             }
 
             Logger.LogInfo("地点菜单自动选择已启用：优先“" + GetPreferredInnerAction() + "”，缺失时自动改选另一档；团体战与对决按钮为独立手动工具。");
+            TryPatchDebugMenuSkills();
             Logger.LogInfo("活侠传日常自动化已加载。按 " + _toggleKey.Value + " 开始/停止，按 " + _windowToggleKey.Value + " 显示/隐藏面板。");
         }
 
