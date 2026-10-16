@@ -14,15 +14,62 @@ namespace LOMDailyAutomation
         {
             GUILayout.Label("对决：");
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("直接获胜", GUILayout.Width(190f)))
+            if (GUILayout.Button("直接获胜", GUILayout.Width(125f)))
             {
                 ResolveDuel(true);
             }
-            if (GUILayout.Button("投降", GUILayout.Width(190f)))
+            if (GUILayout.Button("投降", GUILayout.Width(125f)))
             {
                 ResolveDuel(false);
             }
+            if (GUILayout.Button("加血（回满）", GUILayout.Width(125f)))
+            {
+                HealDuelToFull();
+            }
             GUILayout.EndHorizontal();
+        }
+
+        // 剧情里有“要求撑过若干回合、不胜不败”的对决，随时把血量回满以防被耗死。
+        // 走游戏原生通路：加值 → 钳制到上限 → 刷新血条（与关卡事件同一条）。
+        private void HealDuelToFull()
+        {
+            CombatManager combat = CombatManager.Instance;
+            if (combat == null || combat.CombatLevel == null || combat.PlayerAction == null)
+            {
+                _status = "当前没有对决";
+                Log(_status);
+                return;
+            }
+
+            try
+            {
+                CombatStatController stat = combat.PlayerAction.Stat;
+                if (stat == null)
+                {
+                    _status = "无法读取对决状态";
+                    Log(_status);
+                    return;
+                }
+
+                int max = stat.MaxHealthValue;
+                int current = stat.CurrentHealth;
+                int amount = max - current;
+                if (amount <= 0)
+                {
+                    _status = "对决血量已满";
+                    Log(_status);
+                    return;
+                }
+
+                combat.PlayerAction.StartCoroutine(combat.PlayerAction.ModifyHealth(amount));
+                _status = "对决已回满血量";
+                Log("对决加血：体力 " + current + " → " + max);
+            }
+            catch (Exception ex)
+            {
+                _status = "对决加血失败";
+                Logger.LogError("对决加血失败：" + ex);
+            }
         }
 
         private void ResolveDuel(bool win)
