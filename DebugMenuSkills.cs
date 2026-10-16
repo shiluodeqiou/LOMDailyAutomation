@@ -2,29 +2,222 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using Mortal.Core;
+using UnityEngine;
+using UnityEngine.UI;
 
 namespace LOMDailyAutomation
 {
-    // 作弊选单（F9，“活俠傳作弊測試選單”）技能扩展：
-    // 它的下拉列表按 GameStatType 枚举生成，所以缺“医术 / 战术”这类天赋目标。
-    // 做法：Start 之后把它的 items / gameStatTypes 各追加 N 个槽位（用枚举空洞 199/198 当虚拟类型），
-    // 读取挂 UpdateCurrentStatValue 前缀、写入挂 PlayerStatData.Set 前缀，桥接到天赋等级。
-    // 该插件可能没有安装：找不到 DebugMenu.Plugin 类型时静默跳过，不打补丁、不报错。
+    // 天赋（技能）等级读写小工具：医术/战术等天赋的访问，供下面两个作弊界面扩展共用。
+    internal static class SkillTalentUtil
+    {
+        public static PlayerTalentData Get(string talentId)
+        {
+            PlayerStatManagerData manager = PlayerStatManagerData.Instance;
+            if (manager == null)
+            {
+                return null;
+            }
+
+            PlayerTalentDataCollection talents = manager.Talents;
+            return talents == null ? null : talents.Get(talentId);
+        }
+
+        // 返回调整后的等级；delta 由 AddLevel 内部钳制到 [0, 满级]。天赋不存在时返回 -1。
+        public static int Adjust(string talentId, int delta)
+        {
+            PlayerTalentData talent = Get(talentId);
+            if (talent == null)
+            {
+                return -1;
+            }
+
+            if (delta != 0)
+            {
+                PlayerStatManagerData manager = PlayerStatManagerData.Instance;
+                if (manager != null && manager.Talents != null)
+                {
+                    manager.Talents.Add(talentId, delta);
+                }
+            }
+
+            PlayerTalentData updated = Get(talentId);
+            return updated != null ? updated.Level : talent.Level;
+        }
+    }
+
+    // F9 游戏内置测试面板里克隆出来的“技能行”：显示等级、±1 调整。
+    public sealed class DailyAutomationSkillRow : MonoBehaviour
+    {
+        private Text _valueText;
+        private string _talentId;
+        private int _lastLevel = int.MinValue;
+
+        public void Init(Text valueText, string talentId)
+        {
+            _valueText = valueText;
+            _talentId = talentId;
+            _lastLevel = int.MinValue;
+        }
+
+        public void Adjust(int delta)
+        {
+            int level = SkillTalentUtil.Adjust(_talentId, delta);
+            if (level >= 0)
+            {
+                _lastLevel = level;
+                if (_valueText != null)
+                {
+                    _valueText.text = level.ToString();
+                }
+            }
+        }
+
+        private void Update()
+        {
+            PlayerTalentData talent = SkillTalentUtil.Get(_talentId);
+            int level = talent != null ? talent.Level : -1;
+            if (level != _lastLevel)
+            {
+                _lastLevel = level;
+                if (_valueText != null)
+                {
+                    _valueText.text = level >= 0 ? level.ToString() : "?";
+                }
+            }
+        }
+    }
+
+    // 技能目标表：Label 显示名、TalentId 天赋编号（见 STATUS 的功法数据解析）。
+    // Sentinel 仅用于 F1「活俠傳作弊測試選單」把条目塞进它的 GameStatType 下拉（枚举空洞值）。
     public sealed partial class DailyAutomationPlugin
     {
-        private sealed class DebugMenuSkillEntry
+        private sealed class SkillEntry
         {
             public string Label;
             public string TalentId;
             public GameStatType Sentinel;
         }
 
-        // 技能条目表：以后要再加技能，往这里加一行即可（TalentId 见 STATUS 的功法数据解析）。
-        private static readonly DebugMenuSkillEntry[] DebugMenuSkills =
+        private static readonly SkillEntry[] SkillEntries =
         {
-            new DebugMenuSkillEntry { Label = "★医术", TalentId = "2101", Sentinel = (GameStatType)199 },
-            new DebugMenuSkillEntry { Label = "★战术", TalentId = "9100", Sentinel = (GameStatType)198 }
+            new SkillEntry { Label = "★医术", TalentId = "2101", Sentinel = (GameStatType)199 },
+            new SkillEntry { Label = "★战术", TalentId = "9100", Sentinel = (GameStatType)198 }
         };
+
+        // ---------- F9 游戏自带测试面板（活侠传助手绑的热键，配置项 DebugPanelKey） ----------
+        // 面板行是场景静态对象（TestGameStatPanel 各自引用一个 GameStat 资产），没法改场景，
+        // 改为运行期克隆一行做“技能行”：干掉原组件（其 ±5 监听目标消失即失效）、重接按钮为 ±1。
+
+        private static readonly FieldInfo _statPanelNameField = AccessTools.Field(typeof(TestGameStatPanel), "_nameText");
+        private static readonly FieldInfo _statPanelValueField = AccessTools.Field(typeof(TestGameStatPanel), "_valueText");
+        private static readonly FieldInfo _statPanelAddField = AccessTools.Field(typeof(TestGameStatPanel), "_addText");
+        private static readonly GameObject[] _createdSkillRows = new GameObject[2];
+
+        [HarmonyPatch(typeof(TestGameStatPanel), "Start")]
+        private static class TestGameStatPanelStartPatch
+        {
+            private static void Postfix(TestGameStatPanel __instance)
+            {
+                if (_instance != null)
+                {
+                    _instance.EnsureSkillRows(__instance);
+                }
+            }
+        }
+
+        private void EnsureSkillRows(TestGameStatPanel template)
+        {
+            if (template == null)
+            {
+                return;
+            }
+
+            bool allCreated = true;
+            for (int i = 0; i < _createdSkillRows.Length; i++)
+            {
+                if (_createdSkillRows[i] == null)
+                {
+                    allCreated = false;
+                    break;
+                }
+            }
+            if (allCreated)
+            {
+                return;
+            }
+
+            try
+            {
+                GameObject templateGo = template.gameObject;
+                Transform container = templateGo.transform.parent;
+                if (container == null)
+                {
+                    return;
+                }
+
+                for (int i = 0; i < SkillEntries.Length && i < _createdSkillRows.Length; i++)
+                {
+                    if (_createdSkillRows[i] != null)
+                    {
+                        continue;
+                    }
+
+                    GameObject clone = Instantiate(templateGo, container);
+                    clone.name = "DailySkill_" + SkillEntries[i].TalentId;
+
+                    TestGameStatPanel clonePanel = clone.GetComponent<TestGameStatPanel>();
+                    Text nameText = null;
+                    Text valueText = null;
+                    Text addText = null;
+                    if (clonePanel != null && _statPanelNameField != null && _statPanelValueField != null)
+                    {
+                        nameText = _statPanelNameField.GetValue(clonePanel) as Text;
+                        valueText = _statPanelValueField.GetValue(clonePanel) as Text;
+                        if (_statPanelAddField != null)
+                        {
+                            addText = _statPanelAddField.GetValue(clonePanel) as Text;
+                        }
+                        Destroy(clonePanel);
+                    }
+
+                    if (nameText != null)
+                    {
+                        nameText.text = SkillEntries[i].Label;
+                    }
+                    if (addText != null)
+                    {
+                        addText.text = string.Empty;
+                    }
+
+                    DailyAutomationSkillRow row = clone.AddComponent<DailyAutomationSkillRow>();
+                    row.Init(valueText, SkillEntries[i].TalentId);
+
+                    foreach (Button button in clone.GetComponentsInChildren<Button>(true))
+                    {
+                        Text label = button.GetComponentInChildren<Text>(true);
+                        bool minus = label != null && label.text.TrimStart().StartsWith("-");
+                        button.onClick.RemoveAllListeners();
+                        int delta = minus ? -1 : 1;
+                        button.onClick.AddListener(delegate { row.Adjust(delta); });
+                        if (label != null)
+                        {
+                            label.text = minus ? "-1" : "+1";
+                        }
+                    }
+
+                    _createdSkillRows[i] = clone;
+                }
+
+                Log("F9 测试面板技能行已创建：" + SkillEntries[0].Label + " / " + SkillEntries[1].Label);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("F9 测试面板技能行创建失败：" + ex);
+            }
+        }
+
+        // ---------- F1「活俠傳作弊測試選單」（DebugMenu.dll，独立小窗口）的下拉列表扩展 ----------
+        // 该插件可能没有安装：找不到 DebugMenu.Plugin 类型时静默跳过，不打补丁、不报错。
 
         private static FieldInfo _debugMenuItemsField;
         private static FieldInfo _debugMenuStatTypesField;
@@ -36,7 +229,7 @@ namespace LOMDailyAutomation
             Type pluginType = AccessTools.TypeByName("DebugMenu.Plugin");
             if (pluginType == null)
             {
-                Log("未安装“活俠傳作弊測試選單”（F9 菜单），跳过技能扩展。");
+                Log("未安装“活俠傳作弊測試選單”（F1 菜单），跳过其下拉列表技能扩展。");
                 return;
             }
 
@@ -65,7 +258,7 @@ namespace LOMDailyAutomation
                     prefix: new HarmonyMethod(AccessTools.Method(typeof(DailyAutomationPlugin), "DebugMenuUpdateValuePrefix")));
                 _harmony.Patch(statSet,
                     prefix: new HarmonyMethod(AccessTools.Method(typeof(DailyAutomationPlugin), "DebugMenuStatSetPrefix")));
-                Log("F9 作弊选单技能扩展已应用：下拉列表末尾会追加“★医术 / ★战术”，选中后可直接设定等级。");
+                Log("F1 作弊选单技能扩展已应用：下拉列表末尾会追加“★医术 / ★战术”。");
             }
             catch (Exception ex)
             {
@@ -91,19 +284,19 @@ namespace LOMDailyAutomation
                 }
 
                 if (statTypes.Length > 0 &&
-                    statTypes[statTypes.Length - 1] == DebugMenuSkills[DebugMenuSkills.Length - 1].Sentinel)
+                    statTypes[statTypes.Length - 1] == SkillEntries[SkillEntries.Length - 1].Sentinel)
                 {
                     return; // 已经扩展过
                 }
 
-                string[] newItems = new string[items.Length + DebugMenuSkills.Length];
+                string[] newItems = new string[items.Length + SkillEntries.Length];
                 Array.Copy(items, newItems, items.Length);
-                GameStatType[] newTypes = new GameStatType[statTypes.Length + DebugMenuSkills.Length];
+                GameStatType[] newTypes = new GameStatType[statTypes.Length + SkillEntries.Length];
                 Array.Copy(statTypes, newTypes, statTypes.Length);
-                for (int i = 0; i < DebugMenuSkills.Length; i++)
+                for (int i = 0; i < SkillEntries.Length; i++)
                 {
-                    newItems[items.Length + i] = DebugMenuSkills[i].Label;
-                    newTypes[statTypes.Length + i] = DebugMenuSkills[i].Sentinel;
+                    newItems[items.Length + i] = SkillEntries[i].Label;
+                    newTypes[statTypes.Length + i] = SkillEntries[i].Sentinel;
                 }
 
                 _debugMenuItemsField.SetValue(__instance, newItems);
@@ -136,13 +329,13 @@ namespace LOMDailyAutomation
                     return true;
                 }
 
-                DebugMenuSkillEntry entry = FindDebugMenuSkill(statTypes[selected]);
+                SkillEntry entry = FindSkillEntry(statTypes[selected]);
                 if (entry == null)
                 {
                     return true; // 普通属性走原逻辑
                 }
 
-                PlayerTalentData talent = GetSkillTalent(entry.TalentId);
+                PlayerTalentData talent = SkillTalentUtil.Get(entry.TalentId);
                 _debugMenuCurrentValueField.SetValue(__instance, talent == null ? string.Empty : talent.Level.ToString());
                 return false;
             }
@@ -155,7 +348,7 @@ namespace LOMDailyAutomation
         // PlayerStatData.Set 前缀：技能条目带着哨兵枚举值进来，桥接到天赋等级；普通属性走原逻辑。
         private static bool DebugMenuStatSetPrefix(GameStatType __0, int __1)
         {
-            DebugMenuSkillEntry entry = FindDebugMenuSkill(__0);
+            SkillEntry entry = FindSkillEntry(__0);
             if (entry == null)
             {
                 return true;
@@ -163,28 +356,19 @@ namespace LOMDailyAutomation
 
             try
             {
-                PlayerTalentData talent = GetSkillTalent(entry.TalentId);
-                if (talent == null || _instance == null)
+                int oldLevel = -1;
+                PlayerTalentData talent = SkillTalentUtil.Get(entry.TalentId);
+                if (talent != null)
                 {
-                    return false;
+                    oldLevel = talent.Level;
                 }
 
-                int oldLevel = talent.Level;
-                int delta = __1 - oldLevel;
-                if (delta != 0)
+                int newLevel = SkillTalentUtil.Adjust(entry.TalentId, __1 - oldLevel);
+                if (_instance != null && newLevel >= 0)
                 {
-                    PlayerStatManagerData manager = PlayerStatManagerData.Instance;
-                    if (manager != null && manager.Talents != null)
-                    {
-                        // Add 内部钳制到 [0, 满级]，与升级用的是同一条。
-                        manager.Talents.Add(entry.TalentId, delta);
-                    }
+                    _instance.Log("作弊选单技能：" + entry.Label.TrimStart('★') + " 等级 " +
+                        oldLevel + " → " + newLevel + "（输入 " + __1 + "）");
                 }
-
-                PlayerTalentData updated = GetSkillTalent(entry.TalentId);
-                int newLevel = updated != null ? updated.Level : oldLevel;
-                _instance.Log("作弊选单技能：" + entry.Label.TrimStart('★') + " 等级 " +
-                    oldLevel + " → " + newLevel + "（输入 " + __1 + "）");
             }
             catch (Exception ex)
             {
@@ -197,29 +381,17 @@ namespace LOMDailyAutomation
             return false;
         }
 
-        private static DebugMenuSkillEntry FindDebugMenuSkill(GameStatType type)
+        private static SkillEntry FindSkillEntry(GameStatType type)
         {
-            for (int i = 0; i < DebugMenuSkills.Length; i++)
+            for (int i = 0; i < SkillEntries.Length; i++)
             {
-                if (DebugMenuSkills[i].Sentinel == type)
+                if (SkillEntries[i].Sentinel == type)
                 {
-                    return DebugMenuSkills[i];
+                    return SkillEntries[i];
                 }
             }
 
             return null;
-        }
-
-        private static PlayerTalentData GetSkillTalent(string talentId)
-        {
-            PlayerStatManagerData manager = PlayerStatManagerData.Instance;
-            if (manager == null)
-            {
-                return null;
-            }
-
-            PlayerTalentDataCollection talents = manager.Talents;
-            return talents == null ? null : talents.Get(talentId);
         }
     }
 }
