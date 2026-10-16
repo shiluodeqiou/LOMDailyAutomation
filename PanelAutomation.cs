@@ -84,6 +84,8 @@ namespace LOMDailyAutomation
         private static FieldInfo _upgradePointDataField;
         private static FieldInfo _upgradeMoneyDataField;
         private static FieldInfo _upgradeCurrentItemField;
+        private static FieldInfo _upgradeDevelopPanelField;
+        private static FieldInfo _developItemEventField;
         private static MethodInfo _martialPanelCloseMethod;
         private static MethodInfo _upgradePanelCloseMethod;
 
@@ -114,6 +116,12 @@ namespace LOMDailyAutomation
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             _upgradeCurrentItemField = typeof(UpgradePanel).GetField(
                 "_currentSelectedItem",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            _upgradeDevelopPanelField = typeof(UpgradePanel).GetField(
+                "_developPanel",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            _developItemEventField = typeof(DevelopPanel).GetField(
+                "_itemDevelopEvent",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             _martialPanelCloseMethod = AccessTools.Method(typeof(MartialPanel), "CloseButtonClick");
             _upgradePanelCloseMethod = AccessTools.Method(typeof(UpgradePanel), "CloseButtonClick");
@@ -1365,7 +1373,7 @@ namespace LOMDailyAutomation
             UpgradeItemType[] types = poisonPanel ? PoisonItemTypes : WeaponItemTypes;
             Log("升级面板归属：" + (poisonPanel ? "毒药" : "兵器") + "，点数池=" + pointStat.StatType);
             RepairCurrentUpgradeItem(panel);
-            ProcessUpgradeFamily(types, pointStat, moneyStat, poisonPanel ? "毒药" : "兵器");
+            ProcessUpgradeFamily(panel, types, pointStat, moneyStat, poisonPanel ? "毒药" : "兵器");
         }
 
         // 修复“当前升级项停在 -1 级”的历史遗留状态（旧版进化少调 Init 造成，2026-10-17 修）：
@@ -1434,7 +1442,7 @@ namespace LOMDailyAutomation
             return type == GameStatType.毒藥 || type == GameStatType.全毒藥點數;
         }
 
-        private void ProcessUpgradeFamily(UpgradeItemType[] types, GameStat pointStat, GameStat moneyStat, string family)
+        private void ProcessUpgradeFamily(UpgradePanel panel, UpgradeItemType[] types, GameStat pointStat, GameStat moneyStat, string family)
         {
             int actions = 0;
             while (actions < 400)
@@ -1515,22 +1523,17 @@ namespace LOMDailyAutomation
                             }
 
                             pointStat.AddValue(-costPoints, false);
-                            item.ResetDevelop();
-                            PlayerStatManagerData manager = PlayerStatManagerData.Instance;
-                            manager.SetCurrentUpgradeItem(types[t], entry.NextItem.Key);
 
-                            // 与游戏 DevelopPanel.DevelopCurrentItem 完全对齐：切换后新形态要 Init()
-                            // （等级 0 / 点数 0）并标记已开发；漏掉这步会让新形态停在 ResetDevelop
-                            // 遗留的 -1 状态（显示“-1/10”、无法加点/锻造）——2026-10-17 修复。
-                            UpgradeItemData nextItem = GetUpgradeItem(types[t]);
-                            if (nextItem != null)
-                            {
-                                nextItem.Init();
-                                if (!nextItem.AlreadyDevelop)
-                                {
-                                    nextItem.SetAlreadyDevelop(true);
-                                }
-                            }
+                            // ---- 与游戏 DevelopPanel.DevelopCurrentItem 完全对齐（2026-10-17 治本）----
+                            // 游戏顺序：旧形态 ResetDevelop(-1) → 按“新形态自己的类型”切换当前项 →
+                            // 触发开发事件 → 开发面板 SetCurrentItem → 新形态 Init()（等级 0/点数 0）→
+                            // 标记已开发 → 刷新开发面板。漏掉 Init 会让新形态停在 -1（无法加点/锻造）。
+                            item.ResetDevelop();
+                            UpgradeItemData nextItem = entry.NextItem;
+                            PlayerStatManagerData manager = PlayerStatManagerData.Instance;
+                            manager.SetCurrentUpgradeItem(nextItem.ItemType, nextItem.Key);
+                            RaiseDevelopEvent(panel);
+                            SyncDevelopPanel(panel, nextItem);
                         }
                         catch (Exception ex)
                         {
@@ -1611,6 +1614,71 @@ namespace LOMDailyAutomation
             }
 
             Log("升级面板处理完成（" + family + "），共投入 " + actions + " 次。");
+        }
+
+        // ---- 游戏进化流程的剩余镜像动作（2026-10-17 治本）：全部防御式反射，取不到就跳过 ----
+
+        private void RaiseDevelopEvent(UpgradePanel panel)
+        {
+            try
+            {
+                object developPanel = _upgradeDevelopPanelField == null ? null : _upgradeDevelopPanelField.GetValue(panel);
+                if (developPanel == null)
+                {
+                    return;
+                }
+
+                object gameEvent = _developItemEventField == null ? null : _developItemEventField.GetValue(developPanel);
+                if (gameEvent == null)
+                {
+                    return;
+                }
+
+                MethodInfo raise = AccessTools.Method(gameEvent.GetType(), "Raise", Type.EmptyTypes);
+                if (raise != null)
+                {
+                    raise.Invoke(gameEvent, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("触发开发事件失败：" + ex.Message);
+            }
+        }
+
+        private void SyncDevelopPanel(UpgradePanel panel, UpgradeItemData nextItem)
+        {
+            try
+            {
+                object developPanel = _upgradeDevelopPanelField == null ? null : _upgradeDevelopPanelField.GetValue(panel);
+                if (developPanel != null)
+                {
+                    MethodInfo setCurrent = AccessTools.Method(developPanel.GetType(), "SetCurrentItem", new[] { typeof(UpgradeItemData) });
+                    if (setCurrent != null)
+                    {
+                        setCurrent.Invoke(developPanel, new object[] { nextItem });
+                    }
+                }
+
+                nextItem.Init();
+                if (!nextItem.AlreadyDevelop)
+                {
+                    nextItem.SetAlreadyDevelop(true);
+                }
+
+                if (developPanel != null)
+                {
+                    MethodInfo updatePanel = AccessTools.Method(developPanel.GetType(), "UpdatePanel", Type.EmptyTypes);
+                    if (updatePanel != null)
+                    {
+                        updatePanel.Invoke(developPanel, null);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("同步开发面板失败：" + ex.Message);
+            }
         }
 
         private GameStat ReadPanelStat(Component panel, FieldInfo field, string label)
