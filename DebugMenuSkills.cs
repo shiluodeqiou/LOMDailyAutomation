@@ -111,6 +111,44 @@ namespace LOMDailyAutomation
         private static readonly FieldInfo _statPanelNameField = AccessTools.Field(typeof(TestGameStatPanel), "_nameText");
         private static readonly FieldInfo _statPanelValueField = AccessTools.Field(typeof(TestGameStatPanel), "_valueText");
         private static readonly FieldInfo _statPanelAddField = AccessTools.Field(typeof(TestGameStatPanel), "_addText");
+        private static readonly FieldInfo _statPanelStatField = AccessTools.Field(typeof(TestGameStatPanel), "_stat");
+
+        // “心上人”数值 = lover 编号（剧本里 SetPlayer("lover", N) → 显示 M_Lover_0N）。
+        // 名字取自游戏本地化（sharedassets0 的 M_Lover_00..08），简中文本。
+        private static readonly string[] LoverNames =
+        {
+            "唐默铃", "瑞杏", "叶云裳", "虞小梅", "上官萤", "夏侯兰", "郁竹", "魏菊", "龙湘"
+        };
+
+        // F9 面板“角色数值”里的心上人行：数字后面标出对应人名（名字(编号)）。
+        [HarmonyPatch(typeof(TestGameStatPanel), "UpdateValue")]
+        private static class TestGameStatPanelValuePatch
+        {
+            private static void Postfix(TestGameStatPanel __instance)
+            {
+                if (_instance == null || __instance == null || _statPanelStatField == null || _statPanelValueField == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    GameStat stat = _statPanelStatField.GetValue(__instance) as GameStat;
+                    Text valueText = _statPanelValueField.GetValue(__instance) as Text;
+                    if (stat == null || valueText == null || stat.StatType != GameStatType.愛人)
+                    {
+                        return;
+                    }
+
+                    int id = stat.FinalValue;
+                    string name = id >= 0 && id < LoverNames.Length ? LoverNames[id] : "未知";
+                    valueText.text = name + "(" + id + ")";
+                }
+                catch
+                {
+                }
+            }
+        }
         private static readonly GameObject[] _createdSkillRows = new GameObject[2];
 
         [HarmonyPatch(typeof(TestGameStatPanel), "Start")]
